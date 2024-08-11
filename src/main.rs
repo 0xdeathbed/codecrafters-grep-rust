@@ -7,6 +7,9 @@ fn match_pattern(input_line: &str, pattern: &str) -> bool {
     match pattern.chars().count() {
         2 => match pattern {
             "\\d" => input_line.chars().any(|c| c.is_digit(10)),
+            "\\w" => input_line
+                .chars()
+                .any(|c| c.is_ascii_alphanumeric() || c == '_'),
             _ => panic!("Unrecognized Pattern: {pattern}"),
         },
         _ => return input_line.contains(pattern),
