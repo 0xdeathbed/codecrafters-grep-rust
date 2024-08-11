@@ -5,19 +5,20 @@ use std::process;
 
 fn match_pattern(input_line: &str, pattern: &str) -> bool {
     match pattern {
-        "" => panic!("Empty Pattern not allowed"),
+        c if c.len() == 1 => input_line.contains(c),
         "\\d" => input_line.chars().any(|c| c.is_digit(10)),
         "\\w" => input_line
             .chars()
             .any(|c| c.is_ascii_alphanumeric() || c == '_'),
-        positve
-            if positve.chars().nth(0).is_some_and(|c| c == '[')
-                && positve.chars().last().is_some_and(|c| c == ']') =>
-        {
-            let p = &positve[1..positve.len()];
+        negative if negative.starts_with("[^") && negative.ends_with("]") => {
+            let p = &negative[2..negative.len() - 1];
+            input_line.chars().all(|c| !p.contains(c))
+        }
+        positve if positve.starts_with("[") && positve.ends_with("]") => {
+            let p = &positve[1..positve.len() - 1];
             input_line.chars().any(|c| p.contains(c))
         }
-        _ => input_line.contains(pattern),
+        _ => panic!("Unhandled pattern: {pattern}"),
     }
 }
 
