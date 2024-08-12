@@ -5,12 +5,13 @@ pub enum Pattern {
     Alphanumeric,
     Start,
     End,
+    OneOrMore(char),
     Group(bool, String),
 }
 
 impl Pattern {
     /// Checks From Given Iter
-    pub fn checks(&self, input: &mut impl Iterator<Item = char>) -> bool {
+    pub fn checks(&self, input: &mut (impl Iterator<Item = char> + Clone)) -> bool {
         match input.next() {
             Some(c) => match self {
                 Self::Literal(l) => *l == c,
@@ -18,6 +19,24 @@ impl Pattern {
                 Self::Alphanumeric => c.is_ascii_alphanumeric(),
                 Self::Group(true, postive) => postive.contains(c),
                 Self::Group(false, negative) => !negative.contains(c),
+                Self::OneOrMore(l) => {
+                    if *l == c {
+                        let mut backup = input.clone();
+                        while let Some(character) = input.next() {
+                            if character != *l {
+                                break;
+                            }
+
+                            backup = input.clone();
+                        }
+
+                        *input = backup;
+
+                        true
+                    } else {
+                        false
+                    }
+                }
                 remain => unreachable!("{remain:#?} must not be checked"),
             },
             None => false,
@@ -135,7 +154,13 @@ impl<'a> Regx<'a> {
 
                     pat.push(Pattern::Group(is_positive, group));
                 }
-                l => pat.push(Pattern::Literal(l)),
+                l => {
+                    if chars.next_if(|&c| c == '+').is_some() {
+                        pat.push(Pattern::OneOrMore(l))
+                    } else {
+                        pat.push(Pattern::Literal(l))
+                    }
+                }
             }
         }
 
