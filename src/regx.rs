@@ -1,10 +1,11 @@
 use std::str::Chars;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum Pattern {
     Literal(char),
     Digit,
     Alphanumeric,
+    Start,
     Group(bool, String),
 }
 
@@ -18,6 +19,7 @@ impl Pattern {
                 Self::Alphanumeric => c.is_ascii_alphanumeric(),
                 Self::Group(true, postive) => postive.contains(c),
                 Self::Group(false, negative) => !negative.contains(c),
+                Self::Start => false,
             },
             None => false,
         }
@@ -40,10 +42,17 @@ impl<'a> Regx<'a> {
     /// Checks if Given Pattern is present in Input
     pub fn matches(&self) -> bool {
         'outer: for i in 0..self.input.len() {
-            let input = &self.input[i..];
-            let mut iter = input.chars();
+            let mut patterns = self.pattern.iter().peekable();
 
-            for pattern in self.pattern.iter() {
+            let mut iter = match patterns.peek() {
+                Some(&p) if *p == Pattern::Start => {
+                    patterns.next();
+                    self.input[0..].chars()
+                }
+                _ => self.input[i..].chars(),
+            };
+
+            while let Some(pattern) = patterns.next() {
                 if !pattern.checks(&mut iter) {
                     continue 'outer;
                 }
@@ -60,6 +69,7 @@ impl<'a> Regx<'a> {
         let mut chars = pattern.chars().peekable();
         while let Some(c) = chars.next() {
             match c {
+                '^' => pat.push(Pattern::Start),
                 '\\' => match chars.peek() {
                     Some(p) => {
                         match p {
