@@ -15,26 +15,26 @@ expressions are evaluated.
 **Note**: If you're viewing this repo on GitHub, head over to
 [codecrafters.io](https://codecrafters.io) to try the challenge.
 
-# Passing the first stage
+# Usage
 
-The entry point for your `grep` implementation is in `src/main.rs`. Study and
-uncomment the relevant code, and push your changes to pass the first stage:
+`echo "<INPUT>" | ./your_program.sh -E "<pattern>"`
 
-```sh
-git add .
-git commit -m "pass 1st stage" # any msg
-git push origin master
+```bash
+echo -n "cat" | ./your_program.sh -E "a" # to check if literal is present or not
+echo -n "cat_2" | ./your_program.sh -E "\w" # to check if input have alphanumeric
+echo -n "cat1" | ./your_program.sh -E "\d" # to check if input have digit
+echo -n "sscat" | ./your_program.sh -E "^st" # to check if input starts with given pattern `st`
+echo -n "sscataa" | ./your_program.sh -E "aa$" # to check if input ends with given pattern `aa`
+echo -n "sscat" | ./your_program.sh -E "s+cat" # to check have occurence of one or more
+echo -n "cat" | ./your_program.sh -E "s?cat" # to check have occurence of zero or more
+echo -n "cat" | ./your_program.sh -E "(dog|cat)" # to check have multiple patterns
+echo -n "cat" | ./your_program.sh -E "c." # to check with wildcard
+
 ```
 
-Time to move on to the next stage!
 
-# Stage 2 & beyond
+Program sets exit code for pattern found. It will be set to 0 if found or to 1 if not found or have any error. we can get exit code after running above command
+```bash
+echo $?
 
-Note: This section is for stages 2 and beyond.
-
-1. Ensure you have `cargo (1.62)` installed locally
-1. Run `./your_program.sh` to run your program, which is implemented in
-   `src/main.rs`. This command compiles your Rust project, so it might be slow
-   the first time you run it. Subsequent runs will be fast.
-1. Commit your changes and run `git push origin master` to submit your solution
-   to CodeCrafters. Test output will be streamed to your terminal.
+```
