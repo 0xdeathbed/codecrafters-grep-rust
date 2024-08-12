@@ -6,12 +6,14 @@ pub enum Pattern {
     Start,
     End,
     OneOrMore(char),
+    ZeroOrMore(char),
     Group(bool, String),
 }
 
 impl Pattern {
     /// Checks From Given Iter
     pub fn checks(&self, input: &mut (impl Iterator<Item = char> + Clone)) -> bool {
+        let backup = input.clone();
         match input.next() {
             Some(c) => match self {
                 Self::Literal(l) => *l == c,
@@ -19,19 +21,14 @@ impl Pattern {
                 Self::Alphanumeric => c.is_ascii_alphanumeric(),
                 Self::Group(true, postive) => postive.contains(c),
                 Self::Group(false, negative) => !negative.contains(c),
+                Self::ZeroOrMore(l) => {
+                    *input = backup;
+                    Pattern::skip_char(*l, input);
+                    true
+                }
                 Self::OneOrMore(l) => {
                     if *l == c {
-                        let mut backup = input.clone();
-                        while let Some(character) = input.next() {
-                            if character != *l {
-                                break;
-                            }
-
-                            backup = input.clone();
-                        }
-
-                        *input = backup;
-
+                        Pattern::skip_char(*l, input);
                         true
                     } else {
                         false
@@ -41,6 +38,20 @@ impl Pattern {
             },
             None => false,
         }
+    }
+
+    fn skip_char(character: char, input: &mut (impl Iterator<Item = char> + Clone)) {
+        let mut backup = input.clone();
+        while let Some(c) = input.next() {
+            dbg!(c, character);
+            if c != character {
+                break;
+            }
+
+            backup = input.clone();
+        }
+
+        *input = backup;
     }
 }
 
@@ -157,6 +168,8 @@ impl<'a> Regx<'a> {
                 l => {
                     if chars.next_if(|&c| c == '+').is_some() {
                         pat.push(Pattern::OneOrMore(l))
+                    } else if chars.next_if(|&c| c == '?').is_some() {
+                        pat.push(Pattern::ZeroOrMore(l))
                     } else {
                         pat.push(Pattern::Literal(l))
                     }
