@@ -5,6 +5,7 @@ pub enum Pattern {
     Alphanumeric,
     Start,
     End,
+    Any,
     OneOrMore(char),
     ZeroOrMore(char),
     Group(bool, String),
@@ -16,6 +17,7 @@ impl Pattern {
         let backup = input.clone();
         match input.next() {
             Some(c) => match self {
+                Self::Any => true,
                 Self::Literal(l) => *l == c,
                 Self::Digit => c.is_ascii_digit(),
                 Self::Alphanumeric => c.is_ascii_alphanumeric(),
@@ -125,6 +127,7 @@ impl<'a> Regx<'a> {
         let mut chars = pattern.chars().peekable();
         while let Some(c) = chars.next() {
             match c {
+                '.' => pat.push(Pattern::Any),
                 '^' => pat.push(Pattern::Start),
                 '$' => pat.push(Pattern::End),
                 '\\' => match chars.peek() {
