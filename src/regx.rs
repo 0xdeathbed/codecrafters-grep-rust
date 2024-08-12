@@ -1,3 +1,5 @@
+use std::mem;
+
 #[derive(Debug, PartialEq, Clone)]
 pub enum Pattern {
     Literal(char),
@@ -8,6 +10,7 @@ pub enum Pattern {
     Any,
     OneOrMore(char),
     ZeroOrMore(char),
+    Many(Vec<Vec<Pattern>>),
     Group(bool, String),
 }
 
@@ -23,6 +26,23 @@ impl Pattern {
                 Self::Alphanumeric => c.is_ascii_alphanumeric(),
                 Self::Group(true, postive) => postive.contains(c),
                 Self::Group(false, negative) => !negative.contains(c),
+                Self::Many(patterns) => {
+                    *input = backup;
+
+                    'outer: for pattern in patterns.iter() {
+                        let backup_iter = input.clone();
+                        for p in pattern.iter() {
+                            if !p.checks(input) {
+                                *input = backup_iter;
+                                continue 'outer;
+                            }
+                        }
+
+                        return true;
+                    }
+
+                    false
+                }
                 Self::ZeroOrMore(l) => {
                     *input = backup;
                     Pattern::skip_char(*l, input);
@@ -45,7 +65,6 @@ impl Pattern {
     fn skip_char(character: char, input: &mut (impl Iterator<Item = char> + Clone)) {
         let mut backup = input.clone();
         while let Some(c) = input.next() {
-            dbg!(c, character);
             if c != character {
                 break;
             }
@@ -125,8 +144,27 @@ impl<'a> Regx<'a> {
     fn build_patterns(pattern: &'a str) -> Vec<Pattern> {
         let mut pat = Vec::new();
         let mut chars = pattern.chars().peekable();
+        let mut many_patterns: Vec<Vec<Pattern>> = Vec::new();
+        let mut temp: Vec<Pattern> = Vec::new();
+
         while let Some(c) = chars.next() {
             match c {
+                '(' => {
+                    many_patterns = Vec::new();
+                    temp = mem::take(&mut pat);
+                }
+                '|' => {
+                    many_patterns.push(pat);
+                    pat = Vec::new();
+                    // pat = mem::take(&mut temp);
+                }
+                ')' => {
+                    many_patterns.push(pat.clone());
+                    pat = mem::take(&mut temp);
+
+                    pat.push(Pattern::Many(mem::take(&mut many_patterns)));
+                }
+
                 '.' => pat.push(Pattern::Any),
                 '^' => pat.push(Pattern::Start),
                 '$' => pat.push(Pattern::End),
@@ -136,6 +174,7 @@ impl<'a> Regx<'a> {
                             'w' => pat.push(Pattern::Alphanumeric),
                             'd' => pat.push(Pattern::Digit),
                             '\\' => pat.push(Pattern::Literal('\\')),
+                            '(' => pat.push(Pattern::Literal('(')),
                             err => panic!("Unhandled pattern: {err}"),
                         }
                         chars.next();
