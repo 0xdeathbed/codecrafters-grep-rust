@@ -1,17 +1,16 @@
-use std::str::Chars;
-
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum Pattern {
     Literal(char),
     Digit,
     Alphanumeric,
     Start,
+    End,
     Group(bool, String),
 }
 
 impl Pattern {
     /// Checks From Given Iter
-    pub fn checks(&self, input: &mut Chars) -> bool {
+    pub fn checks(&self, input: &mut impl Iterator<Item = char>) -> bool {
         match input.next() {
             Some(c) => match self {
                 Self::Literal(l) => *l == c,
@@ -19,7 +18,7 @@ impl Pattern {
                 Self::Alphanumeric => c.is_ascii_alphanumeric(),
                 Self::Group(true, postive) => postive.contains(c),
                 Self::Group(false, negative) => !negative.contains(c),
-                Self::Start => false,
+                remain => unreachable!("{remain:#?} must not be checked"),
             },
             None => false,
         }
@@ -28,31 +27,33 @@ impl Pattern {
 
 pub struct Regx<'a> {
     input: &'a str,
-
-    pattern: Vec<Pattern>,
+    patterns: Vec<Pattern>,
 }
 
 impl<'a> Regx<'a> {
     pub fn new(input: &'a str, pattern: &'a str) -> Self {
-        let pattern = Regx::build_patterns(pattern);
+        let patterns = Regx::build_patterns(pattern);
 
-        Self { input, pattern }
+        Self { input, patterns }
     }
 
-    /// Checks if Given Pattern is present in Input
+    /// checks if given pattern is present in input
     pub fn matches(&self) -> bool {
+        if self.patterns[0] == Pattern::Start {
+            self.match_start()
+        } else if self.patterns[self.patterns.len() - 1] == Pattern::End {
+            self.match_end()
+        } else {
+            self.match_pattern()
+        }
+    }
+
+    /// checks if pattern appears anywhere in input
+    pub fn match_pattern(&self) -> bool {
         'outer: for i in 0..self.input.len() {
-            let mut patterns = self.pattern.iter().peekable();
+            let mut iter = self.input[i..].chars();
 
-            let mut iter = match patterns.peek() {
-                Some(&p) if *p == Pattern::Start => {
-                    patterns.next();
-                    self.input[0..].chars()
-                }
-                _ => self.input[i..].chars(),
-            };
-
-            while let Some(pattern) = patterns.next() {
+            for pattern in self.patterns.iter() {
                 if !pattern.checks(&mut iter) {
                     continue 'outer;
                 }
@@ -63,6 +64,31 @@ impl<'a> Regx<'a> {
         false
     }
 
+    /// checks if pattern appears at start
+    fn match_start(&self) -> bool {
+        let mut iter = self.input[0..].chars();
+
+        for pattern in self.patterns[1..].iter() {
+            if !pattern.checks(&mut iter) {
+                return false;
+            }
+        }
+
+        true
+    }
+
+    /// checks if pattern appears at end
+    fn match_end(&self) -> bool {
+        let mut iter = self.input.chars().rev();
+        for pattern in self.patterns.iter().rev().skip(1) {
+            if !pattern.checks(&mut iter) {
+                return false;
+            }
+        }
+
+        true
+    }
+
     /// Build Vec of Patterns
     fn build_patterns(pattern: &'a str) -> Vec<Pattern> {
         let mut pat = Vec::new();
@@ -70,6 +96,7 @@ impl<'a> Regx<'a> {
         while let Some(c) = chars.next() {
             match c {
                 '^' => pat.push(Pattern::Start),
+                '$' => pat.push(Pattern::End),
                 '\\' => match chars.peek() {
                     Some(p) => {
                         match p {
