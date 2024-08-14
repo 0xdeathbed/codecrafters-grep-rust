@@ -5,139 +5,195 @@ pub enum Pattern {
     Literal(char),
     Digit,
     Alphanumeric,
-    Start,
-    End,
     Any,
-    OneOrMore(char),
-    ZeroOrMore(char),
+    OneOrMore(Box<Pattern>),
+    ZeroOrOne(Box<Pattern>),
+    BackReference(usize),
     Many(Vec<Vec<Pattern>>),
     Group(bool, String),
 }
 
 impl Pattern {
     /// Checks From Given Iter
-    pub fn checks(&self, input: &mut (impl Iterator<Item = char> + Clone)) -> bool {
+    pub fn checks(&self, input: &mut (impl Iterator<Item = char> + Clone)) -> (bool, String) {
         let backup = input.clone();
-        match input.next() {
-            Some(c) => match self {
-                Self::Any => true,
-                Self::Literal(l) => *l == c,
-                Self::Digit => c.is_ascii_digit(),
-                Self::Alphanumeric => c.is_ascii_alphanumeric(),
-                Self::Group(true, postive) => postive.contains(c),
-                Self::Group(false, negative) => !negative.contains(c),
-                Self::Many(patterns) => {
-                    *input = backup;
+        let mut captured = String::new();
 
-                    'outer: for pattern in patterns.iter() {
-                        let backup_iter = input.clone();
-                        for p in pattern.iter() {
-                            if !p.checks(input) {
-                                *input = backup_iter;
-                                continue 'outer;
+        let status = match input.next() {
+            Some(c) => {
+                captured.push(c);
+                let is_present = match self {
+                    Self::Any => true,
+                    Self::Literal(l) => *l == c,
+                    Self::Digit => c.is_ascii_digit(),
+                    Self::Alphanumeric => c.is_ascii_alphanumeric(),
+                    Self::Group(true, postive) => postive.contains(c),
+                    Self::Group(false, negative) => !negative.contains(c),
+                    Self::Many(patterns) => {
+                        *input = backup;
+                        captured.pop();
+
+                        'outer: for pattern in patterns.iter() {
+                            let backup_iter = input.clone();
+                            for p in pattern.iter() {
+                                let result = p.checks(input);
+
+                                if !result.0 {
+                                    *input = backup_iter;
+                                    captured = String::new();
+                                    continue 'outer;
+                                }
+
+                                captured.push_str(&result.1);
                             }
+
+                            return (true, captured);
                         }
 
-                        return true;
-                    }
-
-                    false
-                }
-                Self::ZeroOrMore(l) => {
-                    *input = backup;
-                    Pattern::skip_char(*l, input);
-                    true
-                }
-                Self::OneOrMore(l) => {
-                    if *l == c {
-                        Pattern::skip_char(*l, input);
-                        true
-                    } else {
                         false
                     }
+                    Self::ZeroOrOne(p) => {
+                        *input = backup.clone();
+                        captured.pop();
+
+                        let result = p.checks(input);
+                        if !result.0 {
+                            *input = backup;
+                        }
+
+                        captured.push_str(&result.1);
+
+                        true
+                    }
+                    Self::OneOrMore(p) => {
+                        *input = backup;
+                        captured.pop();
+
+                        let mut backup_iter = input.clone();
+                        let mut result = p.checks(input);
+                        if !result.0 {
+                            *input = backup_iter;
+                            false
+                        } else {
+                            captured.push_str(&result.1);
+                            loop {
+                                backup_iter = input.clone();
+                                result = p.checks(input);
+                                if !result.0 {
+                                    *input = backup_iter;
+                                    break;
+                                }
+
+                                captured.push_str(&result.1);
+                            }
+
+                            true
+                        }
+                    }
+                    remain => unreachable!("{remain:#?} must not be checked"),
+                };
+
+                if !is_present {
+                    captured = String::new();
                 }
-                remain => unreachable!("{remain:#?} must not be checked"),
-            },
-            None => false,
-        }
-    }
 
-    fn skip_char(character: char, input: &mut (impl Iterator<Item = char> + Clone)) {
-        let mut backup = input.clone();
-        while let Some(c) = input.next() {
-            if c != character {
-                break;
+                is_present
             }
+            None => false,
+        };
 
-            backup = input.clone();
-        }
-
-        *input = backup;
+        (status, captured)
     }
 }
 
 pub struct Regx<'a> {
     input: &'a str,
     patterns: Vec<Pattern>,
+    start_anchor: bool,
+    end_anchor: bool,
+    backrefernce: Vec<String>,
 }
 
 impl<'a> Regx<'a> {
-    pub fn new(input: &'a str, pattern: &'a str) -> Self {
+    pub fn new(input: &'a str, mut pattern: &'a str) -> Self {
+        let start_anchor = if pattern.starts_with('^') {
+            pattern = &pattern[1..];
+            true
+        } else {
+            false
+        };
+        let end_anchor = if pattern.ends_with('$') {
+            pattern = &pattern[..pattern.len() - 1];
+            true
+        } else {
+            false
+        };
+
         let patterns = Regx::build_patterns(pattern);
 
-        Self { input, patterns }
+        Self {
+            start_anchor,
+            end_anchor,
+            input,
+            patterns,
+            backrefernce: Vec::new(),
+        }
     }
 
     /// checks if given pattern is present in input
-    pub fn matches(&self) -> bool {
-        if self.patterns[0] == Pattern::Start {
-            self.match_start()
-        } else if self.patterns[self.patterns.len() - 1] == Pattern::End {
-            self.match_end()
-        } else {
-            self.match_pattern()
-        }
+    pub fn matches(&mut self) -> bool {
+        self.match_pattern()
     }
 
     /// checks if pattern appears anywhere in input
-    pub fn match_pattern(&self) -> bool {
+    pub fn match_pattern(&mut self) -> bool {
         'outer: for i in 0..self.input.len() {
-            let mut iter = self.input[i..].chars();
+            let input = &self.input[i..];
+            let mut iter = input.chars();
 
             for pattern in self.patterns.iter() {
-                if !pattern.checks(&mut iter) {
-                    continue 'outer;
+                match pattern {
+                    Pattern::BackReference(index) => {
+                        // build pattern on captured pattern
+                        let captured_pattern = Regx::build_patterns(&self.backrefernce[*index - 1]);
+                        for p in captured_pattern {
+                            if !p.checks(&mut iter).0 {
+                                if self.start_anchor {
+                                    return false;
+                                }
+
+                                continue 'outer;
+                            }
+                        }
+                    }
+                    _ => {
+                        let result = pattern.checks(&mut iter);
+                        if !result.0 {
+                            if self.start_anchor {
+                                return false;
+                            }
+
+                            continue 'outer;
+                        }
+
+                        // if pattern was in parenthesis store it for future reference
+                        if let Pattern::Many(_a) = pattern {
+                            self.backrefernce.push(result.1);
+                        }
+                    }
                 }
             }
-            return true;
+
+            // All pattern matched
+            if self.end_anchor {
+                // if at end
+                return iter.next().is_none();
+            } else {
+                return true;
+            };
         }
 
         false
-    }
-
-    /// checks if pattern appears at start
-    fn match_start(&self) -> bool {
-        let mut iter = self.input[0..].chars();
-
-        for pattern in self.patterns[1..].iter() {
-            if !pattern.checks(&mut iter) {
-                return false;
-            }
-        }
-
-        true
-    }
-
-    /// checks if pattern appears at end
-    fn match_end(&self) -> bool {
-        let mut iter = self.input.chars().rev();
-        for pattern in self.patterns.iter().rev().skip(1) {
-            if !pattern.checks(&mut iter) {
-                return false;
-            }
-        }
-
-        true
     }
 
     /// Build Vec of Patterns
@@ -166,8 +222,6 @@ impl<'a> Regx<'a> {
                 }
 
                 '.' => pat.push(Pattern::Any),
-                '^' => pat.push(Pattern::Start),
-                '$' => pat.push(Pattern::End),
                 '\\' => match chars.peek() {
                     Some(p) => {
                         match p {
@@ -175,6 +229,9 @@ impl<'a> Regx<'a> {
                             'd' => pat.push(Pattern::Digit),
                             '\\' => pat.push(Pattern::Literal('\\')),
                             '(' => pat.push(Pattern::Literal('(')),
+                            number if number.is_ascii_digit() => pat.push(Pattern::BackReference(
+                                number.to_digit(10).unwrap() as usize,
+                            )),
                             err => panic!("Unhandled pattern: {err}"),
                         }
                         chars.next();
@@ -207,15 +264,21 @@ impl<'a> Regx<'a> {
 
                     pat.push(Pattern::Group(is_positive, group));
                 }
-                l => {
-                    if chars.next_if(|&c| c == '+').is_some() {
-                        pat.push(Pattern::OneOrMore(l))
-                    } else if chars.next_if(|&c| c == '?').is_some() {
-                        pat.push(Pattern::ZeroOrMore(l))
+                '+' => {
+                    if let Some(p) = pat.pop() {
+                        pat.push(Pattern::OneOrMore(Box::new(p)));
                     } else {
-                        pat.push(Pattern::Literal(l))
+                        pat.push(Pattern::Literal('+'));
                     }
                 }
+                '?' => {
+                    if let Some(p) = pat.pop() {
+                        pat.push(Pattern::ZeroOrOne(Box::new(p)));
+                    } else {
+                        pat.push(Pattern::Literal('?'));
+                    }
+                }
+                l => pat.push(Pattern::Literal(l)),
             }
         }
 

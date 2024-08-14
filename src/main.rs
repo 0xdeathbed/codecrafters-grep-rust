@@ -18,7 +18,7 @@ fn main() -> Result<()> {
 
     io::stdin().read_line(&mut input_line).unwrap();
 
-    let grep = Regx::new(&input_line, &pattern);
+    let mut grep = Regx::new(&input_line, &pattern);
 
     if grep.matches() {
         process::exit(0)
