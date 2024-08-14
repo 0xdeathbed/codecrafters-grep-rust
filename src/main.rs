@@ -21,8 +21,10 @@ fn main() -> Result<()> {
     let mut grep = Regx::new(&input_line, &pattern);
 
     if grep.matches() {
+        println!("Pattern present in input");
         process::exit(0)
     } else {
+        println!("Pattern is not present in input");
         process::exit(1)
     }
 }

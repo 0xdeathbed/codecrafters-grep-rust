@@ -1,4 +1,4 @@
-use std::mem;
+use std::{iter::Peekable, mem, str::Chars};
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Pattern {
@@ -15,28 +15,88 @@ pub enum Pattern {
 
 impl Pattern {
     /// Checks From Given Iter
-    pub fn checks(&self, input: &mut (impl Iterator<Item = char> + Clone)) -> (bool, String) {
+    pub fn checks(
+        &self,
+        input: &mut Peekable<Chars>,
+        backrefrence: &mut Vec<String>,
+        backref_idx: &mut usize,
+    ) -> (bool, String) {
         let backup = input.clone();
         let mut captured = String::new();
 
         let status = match input.next() {
             Some(c) => {
                 captured.push(c);
+                // dbg!(&backrefrence, &input, c);
                 let is_present = match self {
                     Self::Any => true,
                     Self::Literal(l) => *l == c,
                     Self::Digit => c.is_ascii_digit(),
                     Self::Alphanumeric => c.is_ascii_alphanumeric(),
-                    Self::Group(true, postive) => postive.contains(c),
-                    Self::Group(false, negative) => !negative.contains(c),
+                    Self::Group(true, postive) => {
+                        postive.contains(c)
+                        // *input = backup.clone();
+                        // captured.pop();
+                        // let mut is_match = false;
+                        // for _ in postive.chars() {
+                        //     match input.next_if(|&x| postive.contains(x)) {
+                        //         Some(_c) => {
+                        //             // *input = backup.clone();
+                        //             captured.push(_c);
+                        //         }
+                        //         None => {
+                        //             is_match = false;
+                        //             break;
+                        //         }
+                        //     }
+                        // }
+
+                        // is_match
+                    }
+                    Self::Group(false, negative) => {
+                        *input = backup.clone();
+                        captured.pop();
+                        let mut is_match = true;
+                        for _ in negative.chars() {
+                            match input.next_if(|&x| !negative.contains(x)) {
+                                Some(_c) => {
+                                    captured.push(_c);
+                                }
+                                None => {
+                                    // *input = backup.clone();
+                                    is_match = false;
+                                    break;
+                                }
+                            }
+                        }
+
+                        is_match
+                    }
                     Self::Many(patterns) => {
                         *input = backup;
                         captured.pop();
+                        // *backref_idx += 1;
 
                         'outer: for pattern in patterns.iter() {
                             let backup_iter = input.clone();
                             for p in pattern.iter() {
-                                let result = p.checks(input);
+                                if let Pattern::BackReference(index) = p {
+                                    let captured_pattern =
+                                        Regx::build_patterns(&backrefrence[index - 1]);
+                                    // dbg!(index, &backrefrence);
+                                    for p in captured_pattern {
+                                        let result = p.checks(input, backrefrence, backref_idx);
+                                        if !result.0 {
+                                            *input = backup_iter;
+                                            continue 'outer;
+                                        }
+                                        captured.push_str(&result.1);
+                                    }
+                                    continue;
+                                }
+
+                                let current_backref = *backref_idx;
+                                let result = p.checks(input, backrefrence, backref_idx);
 
                                 if !result.0 {
                                     *input = backup_iter;
@@ -45,6 +105,12 @@ impl Pattern {
                                 }
 
                                 captured.push_str(&result.1);
+
+                                if let Pattern::Many(_) = p {
+                                    // dbg!(&current_backref, &backref_idx);
+                                    backrefrence[current_backref] = result.1;
+                                    *backref_idx += 1;
+                                }
                             }
 
                             return (true, captured);
@@ -56,7 +122,7 @@ impl Pattern {
                         *input = backup.clone();
                         captured.pop();
 
-                        let result = p.checks(input);
+                        let result = p.checks(input, backrefrence, backref_idx);
                         if !result.0 {
                             *input = backup;
                         }
@@ -70,15 +136,20 @@ impl Pattern {
                         captured.pop();
 
                         let mut backup_iter = input.clone();
-                        let mut result = p.checks(input);
+                        let mut result = p.checks(input, backrefrence, backref_idx);
                         if !result.0 {
                             *input = backup_iter;
                             false
                         } else {
                             captured.push_str(&result.1);
+                            // dbg!(&captured);
                             loop {
                                 backup_iter = input.clone();
-                                result = p.checks(input);
+                                if let Pattern::Group(false, _) = **p {
+                                    break;
+                                }
+
+                                result = p.checks(input, backrefrence, backref_idx);
                                 if !result.0 {
                                     *input = backup_iter;
                                     break;
@@ -130,13 +201,15 @@ impl<'a> Regx<'a> {
         };
 
         let patterns = Regx::build_patterns(pattern);
+        let mut backrefernce = Vec::new();
+        backrefernce.resize_with(10, Default::default);
 
         Self {
             start_anchor,
             end_anchor,
             input,
             patterns,
-            backrefernce: Vec::new(),
+            backrefernce,
         }
     }
 
@@ -147,17 +220,25 @@ impl<'a> Regx<'a> {
 
     /// checks if pattern appears anywhere in input
     pub fn match_pattern(&mut self) -> bool {
+        // dbg!(&self.patterns);
+        let mut backref_idx;
         'outer: for i in 0..self.input.len() {
+            backref_idx = 0;
             let input = &self.input[i..];
-            let mut iter = input.chars();
+            let mut iter = input.chars().peekable();
 
             for pattern in self.patterns.iter() {
                 match pattern {
                     Pattern::BackReference(index) => {
                         // build pattern on captured pattern
-                        let captured_pattern = Regx::build_patterns(&self.backrefernce[*index - 1]);
+                        let captured_pattern = Regx::build_patterns(&self.backrefernce[index - 1]);
+                        // dbg!(index, &captured_pattern);
                         for p in captured_pattern {
-                            if !p.checks(&mut iter).0 {
+                            if !p
+                                .checks(&mut iter, &mut self.backrefernce, &mut backref_idx)
+                                .0
+                            {
+                                // dbg!(&p);
                                 if self.start_anchor {
                                     return false;
                                 }
@@ -167,7 +248,13 @@ impl<'a> Regx<'a> {
                         }
                     }
                     _ => {
-                        let result = pattern.checks(&mut iter);
+                        let current_backref = backref_idx;
+                        if let Pattern::Many(_) = pattern {
+                            backref_idx += 1;
+                        }
+
+                        let result =
+                            pattern.checks(&mut iter, &mut self.backrefernce, &mut backref_idx);
                         if !result.0 {
                             if self.start_anchor {
                                 return false;
@@ -178,7 +265,10 @@ impl<'a> Regx<'a> {
 
                         // if pattern was in parenthesis store it for future reference
                         if let Pattern::Many(_a) = pattern {
-                            self.backrefernce.push(result.1);
+                            self.backrefernce[current_backref] = result.1;
+                            // dbg!(&current_backref, backref_idx);
+                            // dbg!(&self.backrefernce);
+                            // backref_idx += 1;
                         }
                     }
                 }
